@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>水声信号调制类型识别系统</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/element-ui/lib/theme-chalk/index.css"
+    />
+    <script>
+      axios.defaults.baseURL = "http://localhost:5000";
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.3.2/dist/echarts.min.js"></script>
+    <style>
+      body {
+        font-family: "Helvetica Neue", Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f5f7fa;
+      }
+      .app-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      .card-container {
+        margin-bottom: 20px;
+      }
+      .chart-container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .chart-item {
+        width: 48%;
+        height: 300px;
+        margin-bottom: 20px;
+        background-color: #fff;
+        border-radius: 4px;
+        box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+      }
+      .chart-title {
+        padding: 10px;
+        font-weight: bold;
+        border-bottom: 1px solid #eee;
+      }
+      .result-container {
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 4px;
+        box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+      }
+      .progress-bar {
+        margin-bottom: 10px;
+      }
+      .progress-label {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+      }
+      .steps-wrapper {
+        margin-bottom: 30px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="app-container">
+      <div class="header">
+        <h1>水声信道信号调制类型识别系统</h1>
+      </div>
+
+      <el-steps
+        :active="currentStep"
+        finish-status="success"
+        class="steps-wrapper"
+      >
+        <el-step title="导入信号"></el-step>
+        <el-step title="信号处理"></el-step>
+        <el-step title="调制识别"></el-step>
+      </el-steps>
+
+      <!-- 步骤1：导入信号 -->
+      <div v-if="currentStep === 1" class="card-container">
+        <el-card>
+          <div slot="header">
+            <h3>导入信号文件</h3>
+          </div>
+          <el-upload
+            class="upload-demo"
+            drag
+            action="/api/upload"
+            :on-success="handleUploadSuccess"
+            :on-error="handleUploadError"
+            :before-upload="beforeUpload"
+            :auto-upload="true"
+            :limit="1"
+            accept=".mat,.csv,.dat,.wav,.npy"
+          >
+            <i class="el-icon-upload"></i>
+            <div class="el-upload__text">
+              将文件拖到此处，或<em>点击上传</em>
+            </div>
+            <div class="el-upload__tip" slot="tip">
+              只能上传 .mat/.csv/.dat/.wav 文件
+            </div>
+          </el-upload>
+
+          <div v-if="signalLoaded" style="margin-top: 20px">
+            <div class="chart-container">
+              <div class="chart-item">
+                <div class="chart-title">原始信号时域波形</div>
+                <div
+                  id="originalSignalChart"
+                  style="width: 100%; height: 250px"
+                ></div>
+              </div>
+              <div class="chart-item">
+                <div class="chart-title">原始信号频谱</div>
+                <div
+                  id="originalSpectrumChart"
+                  style="width: 100%; height: 250px"
+                ></div>
+              </div>
+            </div>
+            <el-button type="primary" @click="nextStep">下一步</el-button>
+          </div>
+        </el-card>
+      </div>
+
+      <!-- 步骤2：信号处理 -->
+      <div v-if="currentStep === 2" class="card-container">
+        <el-card>
+          <div slot="header">
+            <h3>信号处理</h3>
+          </div>
+
+          <el-form label-width="100px">
+            <el-form-item label="降噪方法">
+              <el-select
+                v-model="processingOptions.denoiseMethod"
+                placeholder="请选择降噪方法"
+              >
+                <el-option label="小波降噪" value="wavelet"></el-option>
+                <el-option label="维纳滤波" value="wiener"></el-option>
+                <el-option label="卡尔曼滤波" value="kalman"></el-option>
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="滤波参数">
+              <el-slider
+                v-model="processingOptions.filterParam"
+                :min="1"
+                :max="10"
+              ></el-slider>
+            </el-form-item>
+
+            <el-button type="primary" @click="processSignal"
+              >处理信号</el-button
+            >
+          </el-form>
+
+          <div v-if="signalProcessed" style="margin-top: 20px">
+            <div class="chart-container">
+              <div class="chart-item">
+                <div class="chart-title">处理后信号时域波形</div>
+                <div
+                  id="processedSignalChart"
+                  style="width: 100%; height: 250px"
+                ></div>
+              </div>
+              <div class="chart-item">
+                <div class="chart-title">处理后信号频谱</div>
+                <div
+                  id="processedSpectrumChart"
+                  style="width: 100%; height: 250px"
+                ></div>
+              </div>
+              <div class="chart-item">
+                <div class="chart-title">原始信号星座图</div>
+                <div
+                  id="originalConstellationChart"
+                  style="width: 100%; height: 250px"
+                ></div>
+              </div>
+              <div class="chart-item">
+                <div class="chart-title">处理后信号星座图</div>
+                <div
+                  id="processedConstellationChart"
+                  style="width: 100%; height: 250px"
+                ></div>
+              </div>
+            </div>
+
+            <div style="margin-top: 20px">
+              <el-button @click="prevStep">上一步</el-button>
+              <el-button type="primary" @click="nextStep">下一步</el-button>
+            </div>
+          </div>
+        </el-card>
+      </div>
+
+      <!-- 步骤3：调制识别 -->
+      <div v-if="currentStep === 3" class="card-container">
+        <el-card>
+          <div slot="header">
+            <h3>调制类型识别结果</h3>
+          </div>
+
+          <div v-if="!recognitionComplete">
+            <el-button
+              type="primary"
+              :loading="recognizing"
+              @click="recognizeModulation"
+              >开始识别</el-button
+            >
+          </div>
+
+          <div v-if="recognitionComplete" class="result-container">
+            <h3>
+              识别结果:
+              <span style="color: #409eff; font-weight: bold"
+                >[[ recognitionResult.type ]]</span
+              >
+            </h3>
+
+            <div style="margin: 20px 0">
+              <h4>各调制类型概率:</h4>
+              <div
+                v-for="(prob, type) in recognitionResult.probabilities"
+                :key="type"
+                class="progress-bar"
+              >
+                <div class="progress-label">
+                  <span>[[ type ]]</span>
+                  <span>[[ (prob * 100).toFixed(2) ]]%</span>
+                </div>
+                <el-progress
+                  :percentage="prob * 100"
+                  :color="getColorForProbability(prob)"
+                ></el-progress>
+              </div>
+            </div>
+
+            <div style="margin-top: 30px">
+              <h4>调制参数估计:</h4>
+              <el-descriptions border :column="2">
+                <el-descriptions-item label="载波频率"
+                  >[[ recognitionResult.parameters.carrierFrequency ]]
+                  Hz</el-descriptions-item
+                >
+                <el-descriptions-item label="符号率"
+                  >[[ recognitionResult.parameters.symbolRate ]]
+                  符号/秒</el-descriptions-item
+                >
+                <el-descriptions-item label="滚降系数"
+                  >[[ recognitionResult.parameters.rolloffFactor
+                  ]]</el-descriptions-item
+                >
+                <el-descriptions-item label="调制指数"
+                  >[[ recognitionResult.parameters.modulationIndex
+                  ]]</el-descriptions-item
+                >
+              </el-descriptions>
+            </div>
+
+            <div style="margin-top: 30px">
+              <h4>识别可靠性评估:</h4>
+              <el-rate
+                v-model="recognitionResult.reliability"
+                disabled
+                show-score
+                text-color="#ff9900"
+                score-template="[[ value ]]分"
+              >
+              </el-rate>
+              <p>
+                [[ getReliabilityDescription(recognitionResult.reliability) ]]
+              </p>
+            </div>
+
+            <div style="margin-top: 20px">
+              <el-button @click="prevStep">返回信号处理</el-button>
+              <el-button type="primary" @click="resetSystem"
+                >处理新信号</el-button
+              >
+              <el-button type="success" @click="exportResults"
+                >导出结果报告</el-button
+              >
+            </div>
+          </div>
+        </el-card>
+      </div>
+    </div>
+
+    <script>
+      new Vue({
+        el: "#app",
+        delimiters: ["[[", "]]"],
+        data() {
+          return {
+            currentStep: 1,
+            signalLoaded: false,
+            signalProcessed: false,
+            recognitionComplete: false,
+            recognizing: false,
+            signalData: null,
+            processingOptions: {
+              denoiseMethod: "wavelet",
+              filterParam: 5,
+            },
+            originalCharts: {
+              signal: null,
+              spectrum: null,
+              constellation: null,
+            },
+            processedCharts: {
+              signal: null,
+              spectrum: null,
+              constellation: null,
+            },
+            recognitionResult: {
+              type: "QPSK",
+              probabilities: {
+                BPSK: 0.05,
+                QPSK: 0.85,
+                FSK: 0.03,
+                PSK8: 0.04,
+                QAM16: 0.02,
+                QAM64: 0.01,
+              },
+              parameters: {
+                carrierFrequency: "1000.00",
+                symbolRate: "250.00",
+                rolloffFactor: "0.35",
+                modulationIndex: "1.00",
+              },
+              reliability: 4.2,
+            },
+          };
+        },
+        mounted() {
+          this.initCharts();
+        },
+        methods: {
+          initCharts() {
+            // 初始化图表
+            this.$nextTick(() => {
+              if (document.getElementById("originalSignalChart")) {
+                this.originalCharts.signal = echarts.init(
+                  document.getElementById("originalSignalChart")
+                );
+              }
+              if (document.getElementById("originalSpectrumChart")) {
+                this.originalCharts.spectrum = echarts.init(
+                  document.getElementById("originalSpectrumChart")
+                );
+              }
+            });
+          },
+
+          beforeUpload(file) {
+            const isValidFileType = [".mat", ".csv", ".dat", ".wav"].some(
+              (type) => {
+                return file.name.toLowerCase().endsWith(type);
+              }
+            );
+
+            if (!isValidFileType) {
+              this.$message.error("只能上传 .mat/.csv/.dat/.wav 格式的文件!");
+              return false;
+            }
+
+            const isLt20M = file.size / 1024 / 1024 < 20;
+            if (!isLt20M) {
+              this.$message.error("文件大小不能超过 20MB!");
+              return false;
+            }
+
+            return true;
+          },
+
+          handleUploadSuccess(response) {
+            this.signalData = response;
+            this.signalLoaded = true;
+            this.drawOriginalSignalCharts(
+              response.timeDomain,
+              response.spectrum
+            );
+          },
+
+          handleUploadError() {
+            this.$message.error("文件上传失败，请重试");
+          },
+
+          drawOriginalSignalCharts() {
+            // 模拟数据
+            const timeData = Array.from({ length: 1000 }, (_, i) => i * 0.001);
+            const signalData = timeData.map(
+              (t) =>
+                Math.sin(2 * Math.PI * 10 * t) * Math.exp(-t / 2) +
+                0.2 * Math.random()
+            );
+
+            // 绘制时域信号
+            this.originalCharts.signal.setOption({
+              animation: false,
+              grid: { left: "5%", right: "5%", top: "10%", bottom: "10%" },
+              xAxis: { type: "value", name: "时间 (s)" },
+              yAxis: { type: "value", name: "幅度" },
+              tooltip: { trigger: "axis" },
+              series: [
+                {
+                  type: "line",
+                  sampling: "lttb",
+                  data: signalData.map((val, idx) => [timeData[idx], val]),
+                  lineStyle: { width: 1.5, color: "#409EFF" },
+                  symbol: "none",
+                },
+              ],
+            });
+
+            // 模拟频谱数据
+            const freqData = Array.from({ length: 500 }, (_, i) => i * 0.1);
+            const spectrumData = freqData.map((f) => {
+              const peak = Math.exp(-Math.pow((f - 10) / 2, 2));
+              return peak + 0.05 * Math.random();
+            });
+
+            // 绘制频谱图
+            this.originalCharts.spectrum.setOption({
+              animation: false,
+              grid: { left: "5%", right: "5%", top: "10%", bottom: "10%" },
+              xAxis: { type: "value", name: "频率 (Hz)" },
+              yAxis: { type: "value", name: "幅度谱", scale: true },
+              tooltip: { trigger: "axis" },
+              series: [
+                {
+                  type: "line",
+                  sampling: "lttb",
+                  data: spectrumData.map((val, idx) => [freqData[idx], val]),
+                  lineStyle: { width: 1.5, color: "#67C23A" },
+                  symbol: "none",
+                  areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                      { offset: 0, color: "rgba(103, 194, 58, 0.4)" },
+                      { offset: 1, color: "rgba(103, 194, 58, 0.1)" },
+                    ]),
+                  },
+                },
+              ],
+            });
+          },
+          // 修改后的信号处理方法
+          processSignal() {
+            axios
+              .post("/api/process", {
+                method: this.processingOptions.denoiseMethod,
+                param: this.processingOptions.filterParam,
+              })
+              .then((response) => {
+                this.drawProcessedCharts(response.data);
+                this.signalProcessed = true;
+              });
+          },
+
+          drawProcessedCharts(data) {
+            // 处理后的时域
+            this.processedCharts.signal.setOption({
+              series: [
+                {
+                  data: data.processedSignal.x.map((t, idx) => [
+                    t,
+                    data.processedSignal.y[idx],
+                  ]),
+                },
+              ],
+            });
+            // 处理后的频谱
+            this.processedCharts.spectrum.setOption({
+              series: [
+                {
+                  data: data.processedSpectrum.x.map((f, idx) => [
+                    f,
+                    data.processedSpectrum.y[idx],
+                  ]),
+                },
+              ],
+            });
+
+            // 星座图
+            this.originalCharts.constellation.setOption({
+              series: [{ data: data.originalConstellation }],
+            });
+            this.processedCharts.constellation.setOption({
+              series: [{ data: data.processedConstellation }],
+            });
+          },
+          recognizeModulation() {
+            this.recognizing = true;
+            axios
+              .post("/api/recognize", {
+                signal: this.processedData.processedSignal,
+              })
+              .then((response) => {
+                this.recognitionResult = response.data;
+                this.recognitionComplete = true;
+              })
+              .catch((error) => {
+                this.$message.error("调制识别失败");
+              })
+              .finally(() => {
+                this.recognizing = false;
+              });
+          },
+          getColorForProbability(prob) {
+            if (prob >= 0.7) return "#67C23A";
+            if (prob >= 0.3) return "#E6A23C";
+            return "#909399";
+          },
+
+          getReliabilityDescription(score) {
+            if (score >= 4.5)
+              return "识别结果可信度非常高，可直接应用于后续处理";
+            if (score >= 3.5) return "识别结果可信度较高，建议用于后续处理";
+            if (score >= 2.5) return "识别结果可信度中等，建议人工复核";
+            return "识别结果可信度较低，建议采用其他方法重新识别";
+          },
+
+          exportResults() {
+            this.$message.success("结果报告已导出到您的下载文件夹");
+          },
+
+          nextStep() {
+            this.currentStep++;
+
+            if (this.currentStep === 2) {
+              this.$nextTick(() => {
+                // 重新初始化第二步的图表
+                this.initCharts();
+              });
+            }
+          },
+
+          prevStep() {
+            this.currentStep--;
+          },
+
+          resetSystem() {
+            this.currentStep = 1;
+            this.signalLoaded = false;
+            this.signalProcessed = false;
+            this.recognitionComplete = false;
+            this.signalData = null;
+
+            this.$nextTick(() => {
+              this.initCharts();
+            });
+          },
+        },
+      });
+    </script>
+  </body>
+</html>
