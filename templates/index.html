@@ -9,12 +9,12 @@
       rel="stylesheet"
       href="https://unpkg.com/element-ui/lib/theme-chalk/index.css"
     />
-    <script>
-      axios.defaults.baseURL = "http://localhost:5000";
-    </script>
     <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
     <script src="https://unpkg.com/element-ui/lib/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+      axios.defaults.baseURL = "http://localhost:5000";
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.3.2/dist/echarts.min.js"></script>
     <style>
       body {
@@ -111,7 +111,7 @@
               将文件拖到此处，或<em>点击上传</em>
             </div>
             <div class="el-upload__tip" slot="tip">
-              只能上传 .mat/.csv/.dat/.wav 文件
+              只能上传 .mat/.csv/.dat/.wav/.npy文件
             </div>
           </el-upload>
 
@@ -369,14 +369,20 @@
           },
 
           beforeUpload(file) {
-            const isValidFileType = [".mat", ".csv", ".dat", ".wav"].some(
-              (type) => {
-                return file.name.toLowerCase().endsWith(type);
-              }
-            );
+            const isValidFileType = [
+              ".mat",
+              ".csv",
+              ".dat",
+              ".wav",
+              ".npy",
+            ].some((type) => {
+              return file.name.toLowerCase().endsWith(type);
+            });
 
             if (!isValidFileType) {
-              this.$message.error("只能上传 .mat/.csv/.dat/.wav 格式的文件!");
+              this.$message.error(
+                "只能上传 .mat/.csv/.dat/.wav/.npy 格式的文件!"
+              );
               return false;
             }
 
@@ -390,27 +396,72 @@
           },
 
           handleUploadSuccess(response) {
-            this.signalData = response;
-            this.signalLoaded = true;
-            this.drawOriginalSignalCharts(
-              response.timeDomain,
-              response.spectrum
-            );
-          },
+            console.log("上传响应详情:", response);
 
+            // 深度验证数据结构
+            const validateStructure = (data) => {
+              const requiredPaths = [
+                "timeDomain.I.x",
+                "timeDomain.I.y",
+                "timeDomain.Q.x",
+                "timeDomain.Q.y",
+                "spectrum.I.x",
+                "spectrum.I.y",
+                "spectrum.Q.x",
+                "spectrum.Q.y",
+              ];
+
+              return requiredPaths.every((path) => {
+                const keys = path.split(".");
+                let obj = data;
+                for (const key of keys) {
+                  if (!obj || !obj.hasOwnProperty(key)) {
+                    console.error(`缺少必要字段: ${path}`);
+                    return false;
+                  }
+                  obj = obj[key];
+                }
+                return true;
+              });
+            };
+
+            if (!validateStructure(response)) {
+              this.$message.error("数据格式异常，无法显示图表");
+              this.signalLoaded = false;
+              return;
+            }
+
+            // 数据预处理
+            this.signalData = {
+              timeDomain: {
+                I: { x: response.timeDomain.I.x, y: response.timeDomain.I.y },
+                Q: { x: response.timeDomain.Q.x, y: response.timeDomain.Q.y },
+              },
+              spectrum: {
+                I: { x: response.spectrum.I.x, y: response.spectrum.I.y },
+                Q: { x: response.spectrum.Q.x, y: response.spectrum.Q.y },
+              },
+            };
+
+            this.signalLoaded = true;
+
+            // 添加绘制异常处理
+            try {
+              this.drawOriginalSignalCharts(
+                this.signalData.timeDomain,
+                this.signalData.spectrum
+              );
+            } catch (e) {
+              console.error("图表绘制错误:", e);
+              this.$message.error("图表渲染失败");
+              this.signalLoaded = false;
+            }
+          },
           handleUploadError() {
             this.$message.error("文件上传失败，请重试");
           },
 
-          drawOriginalSignalCharts() {
-            // 模拟数据
-            const timeData = Array.from({ length: 1000 }, (_, i) => i * 0.001);
-            const signalData = timeData.map(
-              (t) =>
-                Math.sin(2 * Math.PI * 10 * t) * Math.exp(-t / 2) +
-                0.2 * Math.random()
-            );
-
+          drawOriginalSignalCharts(timeDomain, spectrum) {
             // 绘制时域信号
             this.originalCharts.signal.setOption({
               animation: false,
@@ -422,18 +473,11 @@
                 {
                   type: "line",
                   sampling: "lttb",
-                  data: signalData.map((val, idx) => [timeData[idx], val]),
+                  data: timeDomain.x.map((t, idx) => [t, timeDomain.y[idx]]),
                   lineStyle: { width: 1.5, color: "#409EFF" },
                   symbol: "none",
                 },
               ],
-            });
-
-            // 模拟频谱数据
-            const freqData = Array.from({ length: 500 }, (_, i) => i * 0.1);
-            const spectrumData = freqData.map((f) => {
-              const peak = Math.exp(-Math.pow((f - 10) / 2, 2));
-              return peak + 0.05 * Math.random();
             });
 
             // 绘制频谱图
@@ -447,7 +491,7 @@
                 {
                   type: "line",
                   sampling: "lttb",
-                  data: spectrumData.map((val, idx) => [freqData[idx], val]),
+                  data: spectrum.x.map((f, idx) => [f, spectrum.y[idx]]),
                   lineStyle: { width: 1.5, color: "#67C23A" },
                   symbol: "none",
                   areaStyle: {
