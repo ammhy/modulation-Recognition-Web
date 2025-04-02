@@ -5,7 +5,16 @@ from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 from scipy.fft import fft, fftfreq
 import torch.nn as nn
+from flask_cors import CORS
+import pywt
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+import torch.nn.init as init
+import torch.nn as nn   
+from pytorch_wavelets import DWT1DForward, DWT1DInverse
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
 app.secret_key = 'supersecretkey'
@@ -13,47 +22,50 @@ app.secret_key = 'supersecretkey'
 class EnhancedWaveletDenoise(nn.Module):
     def __init__(self, wavelet='db4', levels=2):
         super().__init__()
-        self.wavelet = wavelet
+        self.dwt = DWT1DForward(wave=wavelet, J=levels)
+        self.idwt = DWT1DInverse(wave=wavelet)
         self.levels = levels
-        self.thresholds = torch.nn.ParameterList([
-            torch.nn.Parameter(torch.tensor(0.1)) for _ in range(levels)
+        self.thresholds = nn.ParameterList([
+            nn.Parameter(torch.tensor(1.0)) for _ in range(levels)
         ])
 
     def adaptive_threshold(self, coeff, level):
         threshold = self.thresholds[level]
         return torch.sign(coeff) * torch.relu(torch.abs(coeff) - threshold)
 
-    def denoise(self, signal):
-        # 转换为PyTorch Tensor
-        signal_tensor = torch.from_numpy(signal).float()
+    def forward(self, x):
+        # 输入形状: [B, T, 2]
+        x = x.permute(0, 2, 1)  # 转换为 [B, 2, T]
+        yl, yh = self.dwt(x)
         
-        # 小波分解
-        coeffs = pywt.wavedec(signal_tensor.numpy(), self.wavelet, level=self.levels)
+        for l in range(self.levels):
+            yh[l] = self.adaptive_threshold(yh[l], l)
         
-        # 阈值处理
-        processed_coeffs = []
-        processed_coeffs.append(coeffs[0])
-        for i in range(1, len(coeffs)):
-            processed_coeffs.append(self.adaptive_threshold(torch.from_numpy(coeffs[i]), i-1).numpy())
-        
-        # 小波重构
-        denoised = pywt.waverec(processed_coeffs, self.wavelet)
-        return denoised[:len(signal)]  # 保证输出长度一致
+        denoised = self.idwt((yl, yh))[:, :, :x.shape[-1]]
+        return denoised.permute(0, 2, 1)  # 恢复为 [B, T, 2]
+
 def process_signal(features):
-    denoiser = EnhancedWaveletDenoise(levels=3)
+    # 初始化设备
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # 处理每个样本
+    # 初始化模型
+    denoiser = EnhancedWaveletDenoise(levels=3).to(device)
+    
     processed_features = []
     for sample in features:
-        # 提取I/Q分量
+        # 预处理：合并I/Q分量并转换为张量
         I = sample[:1024]
         Q = sample[1024:]
+        sample_tensor = torch.from_numpy(np.stack([I, Q], axis=-1)).float().unsqueeze(0).to(device)
         
-        # 分别降噪
-        denoised_I = denoiser.denoise(I)
-        denoised_Q = denoiser.denoise(Q)
+        # 降噪处理
+        with torch.no_grad():
+            denoised_tensor = denoiser(sample_tensor)
         
-        # 合并结果
+        # 后处理：拆分I/Q分量并转换为NumPy
+        denoised_I = denoised_tensor[0, :, 0].cpu().numpy()
+        denoised_Q = denoised_tensor[0, :, 1].cpu().numpy()
+        
         processed_sample = np.concatenate([denoised_I, denoised_Q])
         processed_features.append(processed_sample)
     
@@ -113,34 +125,38 @@ def handle_upload():
 @app.route('/api/process', methods=['POST'])
 def handle_process():
     try:
-        # 从请求中获取文件路径
-        filepath = request.json.get('filepath')
+        # 获取请求数据
+        data = request.get_json()
+        filepath = data['filepath']
+        
+        # 验证文件存在性
         if not os.path.exists(filepath):
             return jsonify({'error': 'File not found'}), 404
-
+        
         # 加载数据
-        data = np.load(filepath, allow_pickle=True).item()
-        features = data['features']
+        raw_data = np.load(filepath, allow_pickle=True).item()
+        features = raw_data['features']
         
-        # 处理信号
+        # 验证数据格式
+        if features.shape[1] != 2048:
+            return jsonify({'error': 'Invalid feature dimension'}), 400
+
+        # 信号处理
         processed_features = process_signal(features)
-        
-        # 提取第一个样本
+
+        # 准备可视化数据（取第一个样本）
         sample_idx = 0
+        
+        # 原始数据
         original_I = features[sample_idx, :1024]
         original_Q = features[sample_idx, 1024:]
+        
+        # 处理后的数据
         processed_I = processed_features[sample_idx, :1024]
         processed_Q = processed_features[sample_idx, 1024:]
-        
-        # 计算频谱
-        def compute_spectrum(signal, fs=1024):
-            n = len(signal)
-            freq = fftfreq(n, 1/fs)[:n//2]
-            spectrum = np.abs(fft(signal)[:n//2]) / n
-            return freq.tolist(), spectrum.tolist()
-        
+
         # 生成响应数据
-        return jsonify({
+        response_data = {
             'original': {
                 'timeDomain': {
                     'I': {'x': np.arange(1024).tolist(), 'y': original_I.tolist()},
@@ -169,10 +185,16 @@ def handle_process():
                     'Q': processed_Q[::10].tolist()
                 }
             }
-        })
-    
+        }
+
+        return jsonify(response_data)
+
+    except KeyError as e:
+        return jsonify({'error': f'Missing key in data: {str(e)}'}), 400
+    except IOError as e:
+        return jsonify({'error': f'File read error: {str(e)}'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
 @app.route('/api/recognize', methods=['POST'])
 def recognize():

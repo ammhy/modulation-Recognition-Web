@@ -271,8 +271,11 @@
                 disabled
                 show-score
                 text-color="#ff9900"
-                score-template="[[ value ]]分"
+                <el-rate
+                ...
+                :score-template="value + '分'"
               >
+                >
               </el-rate>
               <p>
                 [[ getReliabilityDescription(recognitionResult.reliability) ]]
@@ -345,17 +348,34 @@
             };
           },
           mounted() {
-            this.initCharts();
+            window.addEventListener("resize", this.resizeCharts);
+          },
+          beforeDestroy() {
+            window.removeEventListener("resize", this.resizeCharts);
           },
           methods: {
+            resizeCharts() {
+              Object.values(this.processedCharts).forEach((chart) => {
+                chart?.resize();
+              });
+              Object.values(this.originalCharts).forEach((chart) => {
+                chart?.resize();
+              });
+            },
             initCharts() {
-              // 初始化原始图表
-              this.originalCharts.signal = echarts.init(
-                document.getElementById("originalSignalChart")
-              );
-              this.originalCharts.spectrum = echarts.init(
-                document.getElementById("originalSpectrumChart")
-              );
+              // 使用 $nextTick 确保 DOM 更新完成
+              this.$nextTick(() => {
+                // 添加防御性检查
+                const initSafe = (id) => {
+                  const el = document.getElementById(id);
+                  return el ? echarts.init(el) : null;
+                };
+
+                this.originalCharts.signal = initSafe("originalSignalChart");
+                this.originalCharts.spectrum = initSafe(
+                  "originalSpectrumChart"
+                );
+              });
             },
             beforeUpload(file) {
               const isValidFileType = [
@@ -454,23 +474,60 @@
             },
 
             drawProcessedCharts(data) {
-              // 初始化图表
-              this.processedCharts.signal = echarts.init(
-                document.getElementById("processedSignalChart")
-              );
-              this.processedCharts.spectrum = echarts.init(
-                document.getElementById("processedSpectrumChart")
-              );
-              this.originalCharts.constellation = echarts.init(
-                document.getElementById("originalConstellationChart")
-              );
-              this.processedCharts.constellation = echarts.init(
-                document.getElementById("processedConstellationChart")
-              );
+              // 先销毁旧实例
+              this.destroyCharts();
 
+              // 确保 DOM 更新完成
+              this.$nextTick(() => {
+                // 初始化所有图表
+                this.initAllCharts();
+
+                // 绘制图表
+                this.renderCharts(data);
+              });
+            },
+
+            destroyCharts() {
+              // 销毁所有图表实例
+              const charts = [
+                ...Object.values(this.originalCharts),
+                ...Object.values(this.processedCharts),
+              ];
+
+              charts.forEach((chart) => {
+                if (chart) {
+                  chart.dispose();
+                  chart = null;
+                }
+              });
+            },
+
+            initAllCharts() {
+              const initChart = (id) => {
+                const el = document.getElementById(id);
+                if (!el) {
+                  console.error(`Element #${id} not found!`);
+                  return null;
+                }
+                return echarts.init(el);
+              };
+
+              this.processedCharts.signal = initChart("processedSignalChart");
+              this.processedCharts.spectrum = initChart(
+                "processedSpectrumChart"
+              );
+              this.originalCharts.constellation = initChart(
+                "originalConstellationChart"
+              );
+              this.processedCharts.constellation = initChart(
+                "processedConstellationChart"
+              );
+            },
+
+            renderCharts(data) {
               // 绘制处理后的时域波形
-              this.processedCharts.signal.setOption(
-                getTimeDomainOption(
+              this.processedCharts.signal?.setOption(
+                this.getTimeDomainOption(
                   data.processed.timeDomain.I,
                   data.processed.timeDomain.Q,
                   "处理后的信号时域波形"
@@ -478,8 +535,8 @@
               );
 
               // 绘制处理后的频谱
-              this.processedCharts.spectrum.setOption(
-                getSpectrumOption(
+              this.processedCharts.spectrum?.setOption(
+                this.getSpectrumOption(
                   data.processed.spectrum.I,
                   data.processed.spectrum.Q,
                   "处理后的信号频谱"
@@ -487,8 +544,8 @@
               );
 
               // 绘制原始星座图
-              this.originalCharts.constellation.setOption(
-                getConstellationOption(
+              this.originalCharts.constellation?.setOption(
+                this.getConstellationOption(
                   data.original.constellation.I,
                   data.original.constellation.Q,
                   "原始信号星座图"
@@ -496,72 +553,79 @@
               );
 
               // 绘制处理后的星座图
-              this.processedCharts.constellation.setOption(
-                getConstellationOption(
+              this.processedCharts.constellation?.setOption(
+                this.getConstellationOption(
                   data.processed.constellation.I,
                   data.processed.constellation.Q,
                   "处理后的信号星座图"
                 )
               );
-
-              // 公共配置方法
-              function getTimeDomainOption(I, Q, title) {
-                return {
-                  title: { text: title, left: "center" },
-                  xAxis: { type: "value", name: "时间 (s)" },
-                  yAxis: { type: "value", name: "幅度" },
-                  series: [
-                    { data: I.y.map((v, i) => [I.x[i], v]), name: "I分量" },
-                    { data: Q.y.map((v, i) => [Q.x[i], v]), name: "Q分量" },
-                  ],
-                };
-              }
-
-              function getSpectrumOption(I, Q, title) {
-                return {
-                  title: { text: title, left: "center" },
-                  xAxis: { type: "value", name: "频率 (Hz)" },
-                  yAxis: { type: "log", name: "幅度 (dB)" },
-                  series: [
-                    {
-                      data: I[0].map((f, i) => [f, 20 * Math.log10(I[1][i])]),
-                      name: "I频谱",
-                    },
-                    {
-                      data: Q[0].map((f, i) => [f, 20 * Math.log10(Q[1][i])]),
-                      name: "Q频谱",
-                    },
-                  ],
-                };
-              }
-
-              function getConstellationOption(I, Q, title) {
-                return {
-                  title: { text: title, left: "center" },
-                  xAxis: { name: "In-Phase (I)" },
-                  yAxis: { name: "Quadrature (Q)" },
-                  series: [
-                    {
-                      type: "scatter",
-                      symbolSize: 6,
-                      data: I.map((v, i) => [v, Q[i]]),
-                      itemStyle: {
-                        color: function (params) {
-                          const point = params.data;
-                          return point[0] >= 0 && point[1] >= 0
-                            ? "#FF0000"
-                            : point[0] < 0 && point[1] >= 0
-                            ? "#00FF00"
-                            : point[0] < 0 && point[1] < 0
-                            ? "#0000FF"
-                            : "#FF00FF";
-                        },
-                      },
-                    },
-                  ],
-                };
-              }
             },
+            getTimeDomainOption(I, Q, title) {
+              return {
+                title: { text: title, left: "center" },
+                tooltip: { trigger: "axis" },
+                legend: { data: ["I分量", "Q分量"] },
+                xAxis: {
+                  type: "value",
+                  name: "时间 (s)",
+                  min: 0,
+                  max: 1023,
+                },
+                yAxis: {
+                  type: "value",
+                  name: "幅度",
+                  scale: true,
+                },
+                series: [
+                  {
+                    name: "I分量",
+                    type: "line",
+                    showSymbol: false,
+                    data: I.y.map((v, i) => [I.x[i], v]),
+                  },
+                  {
+                    name: "Q分量",
+                    type: "line",
+                    showSymbol: false,
+                    data: Q.y.map((v, i) => [Q.x[i], v]),
+                  },
+                ],
+              };
+            },
+
+            getSpectrumOption(I, Q, title) {
+              return {
+                title: { text: title, left: "center" },
+                tooltip: { trigger: "axis" },
+                xAxis: {
+                  type: "value",
+                  name: "频率 (Hz)",
+                  min: 0,
+                  max: 500, // 根据实际采样率调整
+                },
+                yAxis: {
+                  type: "log",
+                  name: "幅度 (dB)",
+                  scale: true,
+                },
+                series: [
+                  {
+                    name: "I频谱",
+                    type: "line",
+                    areaStyle: {},
+                    data: I[0].map((f, i) => [f, 20 * Math.log10(I[1][i])]),
+                  },
+                  {
+                    name: "Q频谱",
+                    type: "line",
+                    areaStyle: {},
+                    data: Q[0].map((f, i) => [f, 20 * Math.log10(Q[1][i])]),
+                  },
+                ],
+              };
+            },
+
             recognizeModulation() {
               this.recognizing = true;
               axios
