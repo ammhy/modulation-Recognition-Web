@@ -12,9 +12,7 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
     <script src="https://unpkg.com/element-ui/lib/index.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    <script>
-      axios.defaults.baseURL = "http://localhost:5000";
-    </script>
+
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.3.2/dist/echarts.min.js"></script>
     <style>
       body {
@@ -294,224 +292,175 @@
           </div>
         </el-card>
       </div>
+    </div>
+    <script>
+      axios.defaults.baseURL = "http://localhost:5000";
 
-      <script>
-        new Vue({
-          el: "#app",
-          delimiters: ["[[", "]]"],
-          data() {
-            return {
-              currentStep: 1,
-              signalLoaded: false,
-              signalProcessed: false,
-              recognitionComplete: false,
-              recognizing: false,
-              processing: false, // 新增加载状态
-              signalData: {
-                // 修改初始化方式
-                filepath: null,
-                timeDomain: null,
-                spectrum: null,
-              },
-              processingOptions: {
-                denoiseMethod: "wavelet",
-                filterParam: 5,
-              },
-              originalCharts: {
-                signal: null,
-                spectrum: null,
-                constellation: null,
-              },
-              processedCharts: {
-                signal: null,
-                spectrum: null,
-                constellation: null,
-              },
-              recognitionResult: {
-                type: "QPSK",
-                probabilities: {
-                  BPSK: 0.05,
-                  QPSK: 0.85,
-                  FSK: 0.03,
-                  PSK8: 0.04,
-                  QAM16: 0.02,
-                  QAM64: 0.01,
-                },
-                parameters: {
-                  carrierFrequency: "1000.00",
-                  symbolRate: "250.00",
-                  rolloffFactor: "0.35",
-                  modulationIndex: "1.00",
-                },
-                reliability: 4.2,
-              },
-            };
-          },
-          mounted() {
-            window.addEventListener("resize", this.resizeCharts);
-          },
-          beforeDestroy() {
-            window.removeEventListener("resize", this.resizeCharts);
-          },
-          methods: {
-            resizeCharts() {
-              Object.values(this.processedCharts).forEach((chart) => {
-                chart?.resize();
-              });
-              Object.values(this.originalCharts).forEach((chart) => {
-                chart?.resize();
-              });
+      new Vue({
+        el: "#app",
+        data() {
+          return {
+            currentStep: 1,
+            signalLoaded: false,
+            signalProcessed: false,
+            recognitionComplete: false,
+            recognizing: false,
+            processing: false, // 新增加载状态
+            signalData: {
+              // 修改初始化方式
+              filepath: null,
+              timeDomain: null,
+              spectrum: null,
             },
-            initCharts() {
-              // 使用 $nextTick 确保 DOM 更新完成
-              this.$nextTick(() => {
-                // 添加防御性检查
-                const initSafe = (id) => {
-                  const el = document.getElementById(id);
-                  return el ? echarts.init(el) : null;
-                };
-
-                this.originalCharts.signal = initSafe("originalSignalChart");
-                this.originalCharts.spectrum = initSafe(
-                  "originalSpectrumChart"
-                );
-              });
+            processingOptions: {
+              denoiseMethod: "wavelet",
+              filterParam: 5,
             },
-            beforeUpload(file) {
-              const isValidFileType = [
-                ".mat",
-                ".csv",
-                ".dat",
-                ".wav",
-                ".npy",
-              ].some((type) => {
-                return file.name.toLowerCase().endsWith(type);
-              });
-
-              if (!isValidFileType) {
-                this.$message.error(
-                  "只能上传 .mat/.csv/.dat/.wav/.npy 格式的文件!"
-                );
-                return false;
-              }
-
-              const isLt20M = file.size / 1024 / 1024 < 20;
-              if (!isLt20M) {
-                this.$message.error("文件大小不能超过 20MB!");
-                return false;
-              }
-
-              return true;
+            originalCharts: {
+              signal: null,
+              spectrum: null,
+              constellation: null,
             },
-
-            handleUploadSuccess(response) {
-              console.log("完整响应:", response);
-              if (!response || !response.path) {
-                // 修改响应字段检查
-                this.$message.error("服务器返回数据异常");
-                console.error("无效的响应结构:", response);
-                return;
-              }
-
-              this.signalData = {
-                filepath: response.path, // 直接使用response.path
-                timeDomain: null,
-                spectrum: null,
+            processedCharts: {
+              signal: null,
+              spectrum: null,
+              constellation: null,
+            },
+            recognitionResult: {
+              type: "QPSK",
+              probabilities: {
+                BPSK: 0.05,
+                QPSK: 0.85,
+                FSK: 0.03,
+                PSK8: 0.04,
+                QAM16: 0.02,
+                QAM64: 0.01,
+              },
+              parameters: {
+                carrierFrequency: "1000.00",
+                symbolRate: "250.00",
+                rolloffFactor: "0.35",
+                modulationIndex: "1.00",
+              },
+              reliability: 4.2,
+            },
+          };
+        },
+        mounted() {
+          window.addEventListener("resize", this.resizeCharts);
+        },
+        beforeDestroy() {
+          window.removeEventListener("resize", this.resizeCharts);
+        },
+        methods: {
+          resizeCharts() {
+            Object.values(this.processedCharts).forEach((chart) => {
+              chart?.resize();
+            });
+            Object.values(this.originalCharts).forEach((chart) => {
+              chart?.resize();
+            });
+          },
+          initCharts() {
+            // 使用 $nextTick 确保 DOM 更新完成
+            this.$nextTick(() => {
+              // 添加防御性检查
+              const initSafe = (id) => {
+                const el = document.getElementById(id);
+                return el ? echarts.init(el) : null;
               };
 
-              this.signalLoaded = true;
-              this.$message.success("文件上传成功");
-              console.log("更新后的signalData:", this.signalData);
-            },
+              this.originalCharts.signal = initSafe("originalSignalChart");
+              this.originalCharts.spectrum = initSafe("originalSpectrumChart");
+            });
+          },
+          beforeUpload(file) {
+            const isValidFileType = [
+              ".mat",
+              ".csv",
+              ".dat",
+              ".wav",
+              ".npy",
+            ].some((type) => {
+              return file.name.toLowerCase().endsWith(type);
+            });
 
-            processSignal() {
-              if (!this.signalData?.filepath) {
-                this.$message.error("请先上传有效文件");
-                console.error("当前signalData:", this.signalData);
-                return;
-              }
+            if (!isValidFileType) {
+              this.$message.error(
+                "只能上传 .mat/.csv/.dat/.wav/.npy 格式的文件!"
+              );
+              return false;
+            }
 
-              this.processing = true;
-              const loading = this.$loading({
-                lock: true,
-                text: "正在处理信号...",
-                spinner: "el-icon-loading",
-                background: "rgba(0, 0, 0, 0.7)",
+            const isLt20M = file.size / 1024 / 1024 < 20;
+            if (!isLt20M) {
+              this.$message.error("文件大小不能超过 20MB!");
+              return false;
+            }
+
+            return true;
+          },
+
+          handleUploadSuccess(response) {
+            console.log("完整响应:", response);
+            if (!response || !response.path) {
+              // 修改响应字段检查
+              this.$message.error("服务器返回数据异常");
+              console.error("无效的响应结构:", response);
+              return;
+            }
+
+            this.signalData = {
+              filepath: response.path, // 直接使用response.path
+              timeDomain: null,
+              spectrum: null,
+            };
+
+            this.signalLoaded = true;
+            this.$message.success("文件上传成功");
+            console.log("更新后的signalData:", this.signalData);
+          },
+
+          async processSignal() {
+            if (!this.signalData.filepath) {
+              this.$message.error("请先上传文件");
+              return;
+            }
+
+            this.processing = true;
+            const loading = this.$loading({
+              lock: true,
+              text: "处理中...",
+              spinner: "el-icon-loading",
+              background: "rgba(0, 0, 0, 0.7)",
+            });
+
+            try {
+              const { data } = await axios.post("/api/process", {
+                filepath: this.signalData.filepath,
+                options: this.processingOptions,
               });
 
-              axios
-                .post(
-                  "/api/process",
-                  {
-                    filepath: this.signalData.filepath,
-                  },
-                  {
-                    timeout: 30000,
-                  }
-                )
-                .then((response) => {
-                  console.log("处理响应:", response);
-                  if (!response.data?.original) {
-                    throw new Error("无效的响应格式");
-                  }
-                  this.drawProcessedCharts(response.data);
-                  this.signalProcessed = true;
-                })
-                .catch((error) => {
-                  console.error("处理失败详情:", {
-                    error: error,
-                    response: error.response,
-                    request: error.request,
-                  });
-                  this.$message.error(
-                    `处理失败: ${error.response?.data?.error || error.message}`
-                  );
-                })
-                .finally(() => {
-                  loading.close();
-                  this.processing = false;
-                });
-            },
+              this.drawCharts(data);
+              this.signalProcessed = true;
+            } catch (err) {
+              this.$message.error(
+                `处理失败: ${err.response?.data?.error || err.message}`
+              );
+            } finally {
+              loading.close();
+              this.processing = false;
+            }
+          },
 
-            drawProcessedCharts(data) {
-              // 先销毁旧实例
-              this.destroyCharts();
-
-              // 确保 DOM 更新完成
-              this.$nextTick(() => {
-                // 初始化所有图表
-                this.initAllCharts();
-
-                // 绘制图表
-                this.renderCharts(data);
-              });
-            },
-
-            destroyCharts() {
-              // 销毁所有图表实例
-              const charts = [
-                ...Object.values(this.originalCharts),
-                ...Object.values(this.processedCharts),
-              ];
-
-              charts.forEach((chart) => {
-                if (chart) {
-                  chart.dispose();
-                  chart = null;
-                }
-              });
-            },
-
-            initAllCharts() {
+          drawCharts(data) {
+            this.$nextTick(() => {
               const initChart = (id) => {
                 const el = document.getElementById(id);
-                if (!el) {
-                  console.error(`Element #${id} not found!`);
-                  return null;
-                }
-                return echarts.init(el);
+                return el ? echarts.init(el) : null;
               };
 
+              // 初始化图表实例
               this.processedCharts.signal = initChart("processedSignalChart");
               this.processedCharts.spectrum = initChart(
                 "processedSpectrumChart"
@@ -522,174 +471,78 @@
               this.processedCharts.constellation = initChart(
                 "processedConstellationChart"
               );
-            },
 
-            renderCharts(data) {
-              // 绘制处理后的时域波形
-              this.processedCharts.signal?.setOption(
-                this.getTimeDomainOption(
-                  data.processed.timeDomain.I,
-                  data.processed.timeDomain.Q,
-                  "处理后的信号时域波形"
-                )
-              );
-
-              // 绘制处理后的频谱
-              this.processedCharts.spectrum?.setOption(
-                this.getSpectrumOption(
-                  data.processed.spectrum.I,
-                  data.processed.spectrum.Q,
-                  "处理后的信号频谱"
-                )
-              );
-
-              // 绘制原始星座图
-              this.originalCharts.constellation?.setOption(
-                this.getConstellationOption(
-                  data.original.constellation.I,
-                  data.original.constellation.Q,
-                  "原始信号星座图"
-                )
-              );
-
-              // 绘制处理后的星座图
-              this.processedCharts.constellation?.setOption(
-                this.getConstellationOption(
-                  data.processed.constellation.I,
-                  data.processed.constellation.Q,
-                  "处理后的信号星座图"
-                )
-              );
-            },
-            getTimeDomainOption(I, Q, title) {
-              return {
-                title: { text: title, left: "center" },
-                tooltip: { trigger: "axis" },
-                legend: { data: ["I分量", "Q分量"] },
-                xAxis: {
-                  type: "value",
-                  name: "时间 (s)",
-                  min: 0,
-                  max: 1023,
-                },
-                yAxis: {
-                  type: "value",
-                  name: "幅度",
-                  scale: true,
-                },
-                series: [
-                  {
-                    name: "I分量",
-                    type: "line",
-                    showSymbol: false,
-                    data: I.y.map((v, i) => [I.x[i], v]),
-                  },
-                  {
-                    name: "Q分量",
-                    type: "line",
-                    showSymbol: false,
-                    data: Q.y.map((v, i) => [Q.x[i], v]),
-                  },
-                ],
+              // 绘制图表逻辑
+              // 这里需要根据实际数据结构进行调整
+              const setChartOption = (chart, option) => {
+                if (chart) chart.setOption(option);
               };
-            },
 
-            getSpectrumOption(I, Q, title) {
-              return {
-                title: { text: title, left: "center" },
-                tooltip: { trigger: "axis" },
-                xAxis: {
-                  type: "value",
-                  name: "频率 (Hz)",
-                  min: 0,
-                  max: 500, // 根据实际采样率调整
-                },
-                yAxis: {
-                  type: "log",
-                  name: "幅度 (dB)",
-                  scale: true,
-                },
-                series: [
-                  {
-                    name: "I频谱",
-                    type: "line",
-                    areaStyle: {},
-                    data: I[0].map((f, i) => [f, 20 * Math.log10(I[1][i])]),
-                  },
-                  {
-                    name: "Q频谱",
-                    type: "line",
-                    areaStyle: {},
-                    data: Q[0].map((f, i) => [f, 20 * Math.log10(Q[1][i])]),
-                  },
-                ],
+              // 示例选项，需要根据实际数据调整
+              const timeDomainOption = {
+                xAxis: { type: "category" },
+                yAxis: { type: "value" },
+                series: [{ type: "line", data: [] }],
               };
-            },
 
-            recognizeModulation() {
-              this.recognizing = true;
-              axios
-                .post("/api/recognize", {
-                  signal: this.processedData.processedSignal,
-                })
-                .then((response) => {
-                  this.recognitionResult = response.data;
-                  this.recognitionComplete = true;
-                })
-                .catch((error) => {
-                  this.$message.error("调制识别失败");
-                })
-                .finally(() => {
-                  this.recognizing = false;
-                });
-            },
-            getColorForProbability(prob) {
-              if (prob >= 0.7) return "#67C23A";
-              if (prob >= 0.3) return "#E6A23C";
-              return "#909399";
-            },
-
-            getReliabilityDescription(score) {
-              if (score >= 4.5)
-                return "识别结果可信度非常高，可直接应用于后续处理";
-              if (score >= 3.5) return "识别结果可信度较高，建议用于后续处理";
-              if (score >= 2.5) return "识别结果可信度中等，建议人工复核";
-              return "识别结果可信度较低，建议采用其他方法重新识别";
-            },
-
-            exportResults() {
-              this.$message.success("结果报告已导出到您的下载文件夹");
-            },
-
-            nextStep() {
-              this.currentStep++;
-
-              if (this.currentStep === 2) {
-                this.$nextTick(() => {
-                  // 重新初始化第二步的图表
-                  this.initCharts();
-                });
-              }
-            },
-
-            prevStep() {
-              this.currentStep--;
-            },
-
-            resetSystem() {
-              this.currentStep = 1;
-              this.signalLoaded = false;
-              this.signalProcessed = false;
-              this.recognitionComplete = false;
-              this.signalData = null;
-
-              this.$nextTick(() => {
-                this.initCharts();
-              });
-            },
+              setChartOption(this.processedCharts.signal, timeDomainOption);
+              setChartOption(this.processedCharts.spectrum, timeDomainOption);
+              setChartOption(
+                this.originalCharts.constellation,
+                timeDomainOption
+              );
+              setChartOption(
+                this.processedCharts.constellation,
+                timeDomainOption
+              );
+            });
           },
-        });
-      </script>
-    </div>
+          recognizeModulation() {
+            this.recognizing = true;
+            axios
+              .post("/api/recognize", { filepath: this.signalData.filepath })
+              .then((res) => {
+                this.recognitionResult = res.data;
+                this.recognitionComplete = true;
+              })
+              .catch((err) => {
+                this.$message.error("识别失败: " + err.message);
+              })
+              .finally(() => (this.recognizing = false));
+          },
+          getColorForProbability(prob) {
+            return prob >= 0.7
+              ? "#67C23A"
+              : prob >= 0.3
+              ? "#E6A23C"
+              : "#909399";
+          },
+          getReliabilityDescription(score) {
+            if (score >= 4.5) return "识别结果可信度非常高";
+            if (score >= 3.5) return "识别结果可信度较高";
+            if (score >= 2.5) return "识别结果可信度中等";
+            return "识别结果可信度较低";
+          },
+          exportResults() {
+            this.$message.success("导出功能待实现");
+          },
+          nextStep() {
+            this.currentStep = Math.min(this.currentStep + 1, 3);
+          },
+          prevStep() {
+            this.currentStep = Math.max(this.currentStep - 1, 1);
+          },
+          resetSystem() {
+            this.currentStep = 1;
+            this.signalLoaded = false;
+            this.signalProcessed = false;
+            this.recognitionComplete = false;
+            this.signalData = { filepath: null };
+            Object.values(this.processedCharts).forEach((c) => c?.dispose());
+            Object.values(this.originalCharts).forEach((c) => c?.dispose());
+          },
+        },
+      });
+    </script>
   </body>
 </html>
