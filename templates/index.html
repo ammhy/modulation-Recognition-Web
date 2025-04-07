@@ -400,7 +400,10 @@
 
             return true;
           },
-
+          handleUploadError(err) {
+            console.error("上传错误:", err);
+            this.$message.error(`文件上传失败: ${err.message}`);
+          },
           handleUploadSuccess(response) {
             console.log("完整响应:", response);
             if (!response || !response.path) {
@@ -441,12 +444,17 @@
                 options: this.processingOptions,
               });
 
+              if (!data.original || !data.processed) {
+                throw new Error("无效的响应数据结构");
+              }
+
               this.drawCharts(data);
               this.signalProcessed = true;
+              this.$message.success("信号处理完成");
             } catch (err) {
-              this.$message.error(
-                `处理失败: ${err.response?.data?.error || err.message}`
-              );
+              const msg = err.response?.data?.error || err.message;
+              console.error("处理错误:", err);
+              this.$message.error(`处理失败: ${msg}`);
             } finally {
               loading.close();
               this.processing = false;
@@ -455,46 +463,108 @@
 
           drawCharts(data) {
             this.$nextTick(() => {
+              // 初始化图表实例
               const initChart = (id) => {
                 const el = document.getElementById(id);
                 return el ? echarts.init(el) : null;
               };
 
-              // 初始化图表实例
-              this.processedCharts.signal = initChart("processedSignalChart");
-              this.processedCharts.spectrum = initChart(
+              // 处理后的时域图
+              const processedSignalChart = initChart("processedSignalChart");
+              if (processedSignalChart) {
+                processedSignalChart.setOption({
+                  title: { text: "I分量" },
+                  xAxis: { data: data.processed.timeDomain.I.x },
+                  yAxis: { name: "Amplitude" },
+                  series: [
+                    {
+                      data: data.processed.timeDomain.I.y,
+                      type: "line",
+                      smooth: true,
+                      itemStyle: { color: "#409EFF" },
+                    },
+                  ],
+                });
+              }
+
+              // 处理后的频谱图
+              const processedSpectrumChart = initChart(
                 "processedSpectrumChart"
               );
-              this.originalCharts.constellation = initChart(
+              if (processedSpectrumChart) {
+                processedSpectrumChart.setOption({
+                  xAxis: {
+                    data: data.processed.spectrum.I[0],
+                    name: "Frequency (Hz)",
+                  },
+                  yAxis: { name: "Magnitude" },
+                  series: [
+                    {
+                      data: data.processed.spectrum.I[1],
+                      type: "line",
+                      smooth: true,
+                      itemStyle: { color: "#67C23A" },
+                    },
+                  ],
+                });
+              }
+
+              // 原始星座图
+              const originalConstellationChart = initChart(
                 "originalConstellationChart"
               );
-              this.processedCharts.constellation = initChart(
+              if (originalConstellationChart) {
+                const originalPoints = data.original.constellation.I.map(
+                  (i, idx) => [i, data.original.constellation.Q[idx]]
+                );
+                originalConstellationChart.setOption({
+                  xAxis: { name: "I" },
+                  yAxis: { name: "Q" },
+                  series: [
+                    {
+                      type: "scatter",
+                      data: originalPoints,
+                      symbolSize: 6,
+                      itemStyle: { color: "#E6A23C" },
+                    },
+                  ],
+                });
+              }
+
+              // 处理后星座图
+              const processedConstellationChart = initChart(
                 "processedConstellationChart"
               );
+              if (processedConstellationChart) {
+                const processedPoints = data.processed.constellation.I.map(
+                  (i, idx) => [i, data.processed.constellation.Q[idx]]
+                );
+                processedConstellationChart.setOption({
+                  xAxis: { name: "I" },
+                  yAxis: { name: "Q" },
+                  series: [
+                    {
+                      type: "scatter",
+                      data: processedPoints,
+                      symbolSize: 6,
+                      itemStyle: { color: "#409EFF" },
+                    },
+                  ],
+                });
+              }
 
-              // 绘制图表逻辑
-              // 这里需要根据实际数据结构进行调整
-              const setChartOption = (chart, option) => {
-                if (chart) chart.setOption(option);
+              // 存储图表实例
+              this.processedCharts = {
+                signal: processedSignalChart,
+                spectrum: processedSpectrumChart,
+                constellation: processedConstellationChart,
               };
+              this.originalCharts.constellation = originalConstellationChart;
 
-              // 示例选项，需要根据实际数据调整
-              const timeDomainOption = {
-                xAxis: { type: "category" },
-                yAxis: { type: "value" },
-                series: [{ type: "line", data: [] }],
-              };
-
-              setChartOption(this.processedCharts.signal, timeDomainOption);
-              setChartOption(this.processedCharts.spectrum, timeDomainOption);
-              setChartOption(
-                this.originalCharts.constellation,
-                timeDomainOption
-              );
-              setChartOption(
-                this.processedCharts.constellation,
-                timeDomainOption
-              );
+              // 首次渲染后调整尺寸
+              window.setTimeout(() => {
+                this.resizeCharts();
+              }, 100);
             });
           },
           recognizeModulation() {
