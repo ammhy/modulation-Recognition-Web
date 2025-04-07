@@ -16,10 +16,9 @@ from pytorch_wavelets import DWT1DForward, DWT1DInverse
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:*", "http://127.0.0.1:*", "http://0.0.0.0:*"],
-        "methods": ["GET", "POST", "PUT", "DELETE"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
+        "origins": ["http://localhost:*", "http://127.0.0.1:*"],
+        "methods": ["GET", "POST"],
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -193,6 +192,7 @@ def handle_process():
                 }
             }
         }
+        #print('Processed features:', response_data)
 
         return jsonify(response_data)
 
