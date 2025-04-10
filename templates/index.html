@@ -153,11 +153,11 @@
 
           <div v-if="signalProcessed" style="margin-top: 20px">
             <div class="chart-container">
-              <!-- 处理后时域波形 -->
+              <!-- 原始频谱 -->
               <div class="chart-item">
-                <div class="chart-title">处理后信号时域波形</div>
+                <div class="chart-title">原始频谱</div>
                 <div
-                  id="processedSignalChart"
+                  id="originalSpectrumChart"
                   style="width: 100%; height: 250px"
                 ></div>
               </div>
@@ -456,64 +456,184 @@
 
           drawCharts(data) {
             this.$nextTick(() => {
+              // 图表初始化函数
               const initChart = (id) => {
                 const el = document.getElementById(id);
                 return el ? echarts.init(el) : null;
               };
 
-              // 初始化图表实例
-              this.processedCharts.signal = initChart("processedSignalChart");
-              console.log(
-                "刘健",
-                document.getElementById("processedSignalChart")
-              );
-              this.processedCharts.spectrum = initChart(
-                "processedSpectrumChart"
-              );
-              this.originalCharts.constellation = initChart(
-                "originalConstellationChart"
-              );
-              this.processedCharts.constellation = initChart(
-                "processedConstellationChart"
-              );
+              // 初始化所有图表实例
+              const charts = {
+                original: {
+                  spectrum: initChart("originalSpectrumChart"),
+                  constellation: initChart("originalConstellationChart"),
+                },
+                processed: {
+                  spectrum: initChart("processedSpectrumChart"),
+                  constellation: initChart("processedConstellationChart"),
+                },
+              };
 
-              // 绘制图表逻辑
-              // 这里需要根据实际数据结构进行调整
-              const setChartOption = (chart, option) => {
-                if (chart) {
-                  console.log("666");
-                  chart.setOption(option);
+              // ==================== 频谱图配置 ====================
+              const createSpectrumOption = (spectrumData) => {
+                // 防御性数据校验
+                if (
+                  typeof spectrumData !== "object" ||
+                  spectrumData === null ||
+                  !Array.isArray(spectrumData.I) ||
+                  spectrumData.I.length !== 2 ||
+                  !Array.isArray(spectrumData.Q) ||
+                  spectrumData.Q.length !== 2 ||
+                  !Array.isArray(spectrumData.I[0]) ||
+                  spectrumData.I[0].length === 0 ||
+                  !Array.isArray(spectrumData.I[1]) ||
+                  spectrumData.I[1].length === 0 ||
+                  !Array.isArray(spectrumData.Q[0]) ||
+                  spectrumData.Q[0].length === 0 ||
+                  !Array.isArray(spectrumData.Q[1]) ||
+                  spectrumData.Q[1].length === 0
+                ) {
+                  console.error("Invalid spectrum data:", spectrumData);
+                  return {};
                 }
+
+                // 数据转换示例：确保数值类型
+                const processData = (arr) =>
+                  arr.map(Number).filter((v) => !isNaN(v));
+
+                return {
+                  xAxis: {
+                    type: "category",
+                    name: "Frequency (Hz)",
+                    data: processData(spectrumData.I[0]), // 使用I分量的第一个数组作为频率轴
+                  },
+                  yAxis: {
+                    type: "value",
+                    name: "Magnitude (dB)",
+                    // 动态计算Y轴范围
+                    min: (value) => Math.floor(value.min),
+                    max: (value) => Math.ceil(value.max),
+                  },
+                  series: [
+                    {
+                      name: "I",
+                      type: "line",
+                      data: processData(spectrumData.I[1]),
+                      smooth: true,
+                      lineStyle: { width: 1 },
+                    },
+                    {
+                      name: "Q",
+                      type: "line",
+                      data: processData(spectrumData.Q[1]),
+                      smooth: true,
+                      lineStyle: { width: 1 },
+                    },
+                  ],
+                };
               };
 
-              // 示例选项，需要根据实际数据调整
-              const time = data.original.timeDomain;
-              // 获取 I 和 Q 的 y 列表长度的最小值，防止数组越界
-              const minLength = Math.min(time.I.y.length, time.Q.y.length);
-              const time2 = [];
-              // 遍历 I 和 Q 的 y 列表，构建 time2 数组
-              for (let i = 0; i < minLength; i++) {
-                time2.push({
-                  category: time.I.y[i],
-                  value: time.Q.y[i],
-                });
-              }
-              const timeDomainOption = {
-                xAxis: { type: "category" },
-                yAxis: { type: "value" },
-                series: [{ type: "line", data: time2 }],
+              // ==================== 星座图配置 ====================
+              const createConstellationOption = (constellationData) => {
+                // 数据预处理
+                const points = [];
+                const allI = constellationData.I.map(Number);
+                const allQ = constellationData.Q.map(Number);
+
+                const maxVal = Math.max(
+                  Math.max(...allI.map(Math.abs)),
+                  Math.max(...allQ.map(Math.abs))
+                );
+
+                // 生成对称坐标范围
+                const axisLimit = Math.ceil(maxVal * 1.2); // 留20%边距
+
+                return {
+                  xAxis: {
+                    name: "In-phase (I)",
+                    type: "value",
+                    min: -axisLimit,
+                    max: axisLimit,
+                    axisLine: { lineStyle: { color: "#333" } },
+                    splitLine: { show: true },
+                  },
+                  yAxis: {
+                    name: "Quadrature (Q)",
+                    type: "value",
+                    min: -axisLimit,
+                    max: axisLimit,
+                    axisLine: { lineStyle: { color: "#333" } },
+                    splitLine: { show: true },
+                  },
+                  series: [
+                    {
+                      type: "scatter",
+                      symbolSize: 6,
+                      data: allI.map((i, idx) => [i, allQ[idx]]),
+                      itemStyle: {
+                        color: "#1890ff",
+                        opacity: 0.6,
+                      },
+                    },
+                  ],
+                  // 添加中心参考线
+                  graphic: [
+                    {
+                      type: "line",
+                      shape: { x1: -axisLimit, y1: 0, x2: axisLimit, y2: 0 },
+                      style: {
+                        stroke: "#666",
+                        lineWidth: 1,
+                      },
+                    },
+                    {
+                      type: "line",
+                      shape: { x1: 0, y1: -axisLimit, x2: 0, y2: axisLimit },
+                      style: {
+                        stroke: "#666",
+                        lineWidth: 1,
+                      },
+                    },
+                  ],
+                };
               };
-              console.log("时域波形", time2);
-              setChartOption(this.processedCharts.signal, timeDomainOption);
-              setChartOption(this.processedCharts.spectrum, timeDomainOption);
-              setChartOption(
-                this.originalCharts.constellation,
-                timeDomainOption
-              );
-              setChartOption(
-                this.processedCharts.constellation,
-                timeDomainOption
-              );
+              // ==================== 数据绑定 ====================
+              // 原始频谱图
+              if (charts.original.spectrum) {
+                charts.original.spectrum.setOption(
+                  createSpectrumOption(data.original.spectrum)
+                );
+              }
+
+              // 处理后频谱图
+              if (charts.processed.spectrum) {
+                charts.processed.spectrum.setOption(
+                  createSpectrumOption(data.processed.spectrum)
+                );
+              }
+
+              // 原始星座图
+              if (charts.original.constellation) {
+                charts.original.constellation.setOption(
+                  createConstellationOption(data.original.constellation)
+                );
+              }
+
+              // 处理后星座图
+              if (charts.processed.constellation) {
+                charts.processed.constellation.setOption(
+                  createConstellationOption(data.processed.constellation)
+                );
+              }
+
+              // ==================== 窗口 resize 监听 ====================
+              window.addEventListener("resize", () => {
+                Object.values(charts).forEach((group) => {
+                  Object.values(group).forEach((chart) => {
+                    if (chart) chart.resize();
+                  });
+                });
+              });
             });
           },
           recognizeModulation() {
