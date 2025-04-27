@@ -213,83 +213,45 @@
               >开始识别</el-button
             >
           </div>
+          {% block vue_content %} {% raw %}
+          <div v-if="recognitionComplete " class="result-container">
+            <!-- 主要识别结果 -->
+            <div class="main-result">
+              <h3>
+                识别结果：
+                <span style="color: #409eff; font-weight: bold">
+                  {{ type }}
+                </span>
+              </h3>
+            </div>
 
-          <div v-if="recognitionComplete" class="result-container">
-            <h3>
-              识别结果:
-              <span style="color: #409eff; font-weight: bold"
-                >[[ recognitionResult.type ]]</span
-              >
-            </h3>
-
-            <div style="margin: 20px 0">
-              <h4>各调制类型概率:</h4>
+            <!-- 九种调制类型概率展示 -->
+            <div class="probability-grid">
               <div
-                v-for="(prob, type) in recognitionResult.probabilities"
+                v-for="(prob, type) in probabilities"
                 :key="type"
-                class="progress-bar"
+                class="probability-item"
               >
-                <div class="progress-label">
-                  <span>[[ type ]]</span>
-                  <span>[[ (prob * 100).toFixed(2) ]]%</span>
-                </div>
+                <div class="type-label">{{ type }}</div>
                 <el-progress
                   :percentage="prob * 100"
+                  :stroke-width="18"
                   :color="getColorForProbability(prob)"
-                ></el-progress>
+                  :format="formatPercentage"
+                />
+                <div class="percentage">{{ (prob * 100).toFixed(1) }}%</div>
               </div>
             </div>
 
-            <div style="margin-top: 30px">
-              <h4>调制参数估计:</h4>
-              <el-descriptions border :column="2">
-                <el-descriptions-item label="载波频率"
-                  >[[ recognitionResult.parameters.carrierFrequency ]]
-                  Hz</el-descriptions-item
-                >
-                <el-descriptions-item label="符号率"
-                  >[[ recognitionResult.parameters.symbolRate ]]
-                  符号/秒</el-descriptions-item
-                >
-                <el-descriptions-item label="滚降系数"
-                  >[[ recognitionResult.parameters.rolloffFactor
-                  ]]</el-descriptions-item
-                >
-                <el-descriptions-item label="调制指数"
-                  >[[ recognitionResult.parameters.modulationIndex
-                  ]]</el-descriptions-item
-                >
-              </el-descriptions>
-            </div>
-
-            <div style="margin-top: 30px">
-              <h4>识别可靠性评估:</h4>
-              <el-rate
-                v-model="recognitionResult.reliability"
-                disabled
-                show-score
-                text-color="#ff9900"
-                <el-rate
-                ...
-                :score-template="value + '分'"
-              >
-                >
-              </el-rate>
-              <p>
-                [[ getReliabilityDescription(recognitionResult.reliability) ]]
-              </p>
-            </div>
-
-            <div style="margin-top: 20px">
-              <el-button @click="prevStep">返回信号处理</el-button>
+            <!-- 操作按钮 -->
+            <div class="action-buttons">
+              <el-button @click="prevStep">返回上一步</el-button>
               <el-button type="primary" @click="resetSystem"
                 >处理新信号</el-button
               >
-              <el-button type="success" @click="exportResults"
-                >导出结果报告</el-button
-              >
             </div>
           </div>
+          {% endraw %} {% endblock %}
         </el-card>
       </div>
     </div>
@@ -306,7 +268,7 @@
             signalProcessed: true,
             recognitionComplete: false,
             recognizing: false,
-            processing: false, // 新增加载状态
+            processing: false,
             signalData: {
               // 修改初始化方式
               filepath: null,
@@ -327,24 +289,9 @@
               spectrum: null,
               constellation: null,
             },
-            recognitionResult: {
-              type: "QPSK",
-              probabilities: {
-                BPSK: 0.05,
-                QPSK: 0.85,
-                FSK: 0.03,
-                PSK8: 0.04,
-                QAM16: 0.02,
-                QAM64: 0.01,
-              },
-              parameters: {
-                carrierFrequency: "1000.00",
-                symbolRate: "250.00",
-                rolloffFactor: "0.35",
-                modulationIndex: "1.00",
-              },
-              reliability: 4.2,
-            },
+
+            type: "", // 初始为空字符串
+            probabilities: {}, // 初始为空对象
           };
         },
         mounted() {
@@ -375,6 +322,13 @@
               this.originalCharts.spectrum = initSafe("originalSpectrumChart");
             });
           },
+          nextStep() {
+            // 确保能进入此方法（可在方法内加console调试）
+            if (this.currentStep < 3) {
+              // 假设总共有3步
+              this.currentStep++;
+            }
+          },
           beforeUpload(file) {
             const isValidFileType = [
               ".mat",
@@ -404,6 +358,7 @@
 
           handleUploadSuccess(response) {
             console.log("完整响应:", response);
+
             if (!response || !response.path) {
               // 修改响应字段检查
               this.$message.error("服务器返回数据异常");
@@ -639,9 +594,33 @@
           recognizeModulation() {
             this.recognizing = true;
             axios
-              .post("/api/recognize", { filepath: this.signalData.filepath })
+              .post("/api/recognize", {
+                filepath: this.signalData.filepath,
+              })
               .then((res) => {
-                this.recognitionResult = res.data;
+                console.log("后端返回数据:", res.data);
+                // 定义类型顺序（必须与后端返回的数组顺序一致！）
+                const modulationTypes = [
+                  "OFDM",
+                  "2FSK",
+                  "4FSK",
+                  "8FSK",
+                  "BPSK",
+                  "QPSK",
+                  "8PSK",
+                  "16QAM",
+                  "64QAM",
+                ];
+
+                // 将数组转换为 {类型: 概率} 的对象
+                const probabilities = {};
+                modulationTypes.forEach((type, index) => {
+                  probabilities[type] = res.data.probabilities[index]; // 直接使用 probabilities
+                });
+
+                // 更新识别结果
+                (this.type = res.data.type), // 直接使用 type
+                  (this.probabilities = probabilities);
                 this.recognitionComplete = true;
               })
               .catch((err) => {
@@ -649,36 +628,17 @@
               })
               .finally(() => (this.recognizing = false));
           },
+          // 进度条颜色计算
           getColorForProbability(prob) {
-            return prob >= 0.7
-              ? "#67C23A"
-              : prob >= 0.3
-              ? "#E6A23C"
-              : "#909399";
+            const value = prob * 100;
+            if (value >= 70) return "#67C23A"; // 高概率绿色
+            if (value >= 40) return "#E6A23C"; // 中概率橙色
+            return "#F56C6C"; // 低概率红色
           },
-          getReliabilityDescription(score) {
-            if (score >= 4.5) return "识别结果可信度非常高";
-            if (score >= 3.5) return "识别结果可信度较高";
-            if (score >= 2.5) return "识别结果可信度中等";
-            return "识别结果可信度较低";
-          },
-          exportResults() {
-            this.$message.success("导出功能待实现");
-          },
-          nextStep() {
-            this.currentStep = Math.min(this.currentStep + 1, 3);
-          },
-          prevStep() {
-            this.currentStep = Math.max(this.currentStep - 1, 1);
-          },
-          resetSystem() {
-            this.currentStep = 1;
-            this.signalLoaded = false;
-            this.signalProcessed = false;
-            this.recognitionComplete = false;
-            this.signalData = { filepath: null };
-            Object.values(this.processedCharts).forEach((c) => c?.dispose());
-            Object.values(this.originalCharts).forEach((c) => c?.dispose());
+
+          // 百分比格式化
+          formatPercentage(percentage) {
+            return `${percentage.toFixed(1)}%`;
           },
         },
       });

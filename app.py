@@ -13,6 +13,8 @@ import torch.optim as optim
 import torch.nn.init as init
 import torch.nn as nn   
 from pytorch_wavelets import DWT1DForward, DWT1DInverse
+from model_paper import EnhancedResNetTransformer  
+
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
@@ -24,6 +26,11 @@ CORS(app, resources={
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
 app.secret_key = 'supersecretkey'
+num_classes = 9
+
+
+# 定义调制类型列表
+modulation_types = ['OFDM', '2FSK', '4FSK', '8FSK', 'BPSK', 'QPSK', '8PSK', '16QAM', '64QAM']
 
 class EnhancedWaveletDenoise(nn.Module):
     def __init__(self, wavelet='db4', levels=2):
@@ -205,25 +212,76 @@ def handle_process():
 
 @app.route('/api/recognize', methods=['POST'])
 def recognize():
-    return jsonify({
-        'type': 'QPSK',
-        'probabilities': {
-            'BPSK': 0.05,
-            'QPSK': 0.85,
-            'FSK': 0.03,
-            'PSK8': 0.04,
-            'QAM16': 0.02,
-            'QAM64': 0.01
-        },
-        'parameters': {
-            'carrierFrequency': "1000.00",
-            'symbolRate': "250.00",
-            'rolloffFactor': "0.35",
-            'modulationIndex': "1.00"
-        },
-        'reliability': 4.2
-    })
+    data = request.get_json()
+    filepath = data.get('filepath')
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(filepath):
+            print(f"错误：文件 {filepath} 不存在！")
+            return 0
+
+        # 加载数据
+        data = np.load(filepath, allow_pickle=True).item()
+        features = data['features']
+        print(f"加载的 features 形状: {features.shape}")  # 确保是 (1, 2048)
+        if features.ndim == 1:
+            features = features[np.newaxis, :]  # 变为 (1, 2048)
+        
+        I_component = features[:, :1024]    # (1, 1024)
+        Q_component = features[:, 1024:]   # (1, 1024)
+        
+        # 堆叠为 (batch_size=1, channels=2, sequence_length=1024)
+        IQ_samples = np.stack((I_component, Q_component), axis=1)  # 形状 (1, 2, 1024)
+        print(f"单样本输入维度: {IQ_samples.shape}")  # 输出 (1, 2, 1024)
+        
+        # 归一化（避免除零）
+        max_val = np.max(np.abs(IQ_samples))
+        if max_val == 0:
+            print("错误：数据全零，无法归一化！")
+            return 0
+        IQ_samples = IQ_samples / max_val  # 改为浮点除法
+        
+        # 转换为张量并移至设备
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"使用设备: {device}")
+        inputs = torch.tensor(IQ_samples, dtype=torch.float32).to(device)
+        inputs = inputs.permute(0, 2, 1)
+        # 初始化模型
+        model = EnhancedResNetTransformer(num_classes=9).to(device)
+        
+        # 加载预训练模型参数    
+        model_path = 'output_paper1.pth'  # 显式定义模型路径
+        if not os.path.exists(model_path):
+            print(f"错误：模型文件 {model_path} 不存在！")
+            return 0
+        try:
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            model.eval()
+        except Exception as e:
+            print(f"加载模型失败: {e}")
+            return 0
+        
+        # 模型推理
+        with torch.no_grad():
+            outputs = model(inputs)
+            _, preds = torch.max(outputs, 1)
+            probabilities = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+            max_prob_index = np.argmax(probabilities)
+            max_prob = probabilities[max_prob_index]
+            recognition_type = modulation_types[max_prob_index]
+            print(f"识别结果: {recognition_type}, 置信度: {max_prob:.4f}")  # 保留4位小数
+            return jsonify ({
+               
+                'type': recognition_type,
+                'probabilities': probabilities.tolist(),  # 返回所有类别的概率
+                
+            })  
+    except Exception as e:
+        print(f"处理异常: {e}")
+        return jsonify({'error': 'Processing failed'}), 500
+
+        
+    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
-    ##step2 success
